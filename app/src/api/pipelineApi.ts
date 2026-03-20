@@ -1,3 +1,15 @@
+import {
+  generate302Image,
+  generate302Music,
+  generate302Text,
+  generate302Video,
+} from "./provider302";
+import {
+  resolve302ImageModel,
+  resolve302MusicModel,
+  resolve302VideoModel,
+} from "./provider302Models";
+
 const API_BASE_URL =
   (import.meta.env.VITE_WORKER_API_BASE_URL as string | undefined)?.replace(
     /\/$/,
@@ -210,22 +222,20 @@ export async function apiGenerateImage(
   params: GenerateImageParams,
 ): Promise<GenerateImageResult> {
   try {
-    const response = await fetch(buildApiUrl("/api/generate-image"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+    const result = await generate302Image({
+      model: resolve302ImageModel(params.model),
+      prompt: params.prompt,
+      negativePrompt: params.negativePrompt,
+      size:
+        params.width && params.height
+          ? `${params.width}x${params.height}`
+          : undefined,
+      count: params.count,
+      aspectRatio: params.aspectRatio,
+      seed: params.seed,
+      referenceImageUrl: params.referenceImageUrl,
     });
-
-    if (!response.ok) {
-      if (response.status === 404 || response.status >= 500) {
-        return createImagePlaceholderResult(params);
-      }
-      throw new Error(
-        `${API_ERROR_PREFIX}${await parseError(response, "Image generation failed")}`,
-      );
-    }
-
-    return (await response.json()) as GenerateImageResult;
+    return result;
   } catch (error) {
     if (
       error instanceof Error &&
@@ -241,22 +251,18 @@ export async function apiGenerateVideo(
   params: GenerateVideoParams,
 ): Promise<GenerateVideoResult> {
   try {
-    const response = await fetch(buildApiUrl("/api/generate-video"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+    const result = await generate302Video({
+      model: resolve302VideoModel(params.model),
+      prompt: params.prompt,
+      mode: params.mode ?? "text_to_video",
+      durationSeconds: params.durationSeconds,
+      aspectRatio: params.aspectRatio,
+      seed: params.seed,
+      startImageUrl: params.startImageUrl,
+      endImageUrl: params.endImageUrl,
+      referenceImageUrls: params.referenceImageUrls,
     });
-
-    if (!response.ok) {
-      if (response.status === 404 || response.status >= 500) {
-        return createVideoPlaceholderResult(params);
-      }
-      throw new Error(
-        `${API_ERROR_PREFIX}${await parseError(response, "Video generation failed")}`,
-      );
-    }
-
-    return (await response.json()) as GenerateVideoResult;
+    return result;
   } catch (error) {
     if (
       error instanceof Error &&
@@ -272,22 +278,14 @@ export async function apiGenerateMusic(
   params: GenerateMusicParams,
 ): Promise<GenerateMusicResult> {
   try {
-    const response = await fetch(buildApiUrl("/api/generate-music"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+    const result = await generate302Music({
+      model: resolve302MusicModel(params.model),
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      seed: params.seed,
+      referenceAudioUrl: params.referenceAudioUrl,
     });
-
-    if (!response.ok) {
-      if (response.status === 404 || response.status >= 500) {
-        return createMusicPlaceholderResult(params);
-      }
-      throw new Error(
-        `${API_ERROR_PREFIX}${await parseError(response, "Music generation failed")}`,
-      );
-    }
-
-    return (await response.json()) as GenerateMusicResult;
+    return result;
   } catch (error) {
     if (
       error instanceof Error &&
@@ -361,25 +359,19 @@ export interface GenerateTextResult {
 export async function apiGenerateText(
   params: GenerateTextParams,
 ): Promise<GenerateTextResult> {
-  const coercedParams = {
-    ...params,
-    input: params.input != null ? String(params.input) : undefined,
-  };
   try {
-    const response = await fetch(buildApiUrl("/api/generate-text"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(coercedParams),
+    const input = params.input != null ? String(params.input) : undefined;
+    const prompt = [params.prompt, input, params.document]
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .join("\n\n");
+
+    return await generate302Text({
+      model: "gemini-3.1-pro-preview",
+      systemPrompt:
+        "你是 MovieClaw 演示版中的文本生成助手。请严格根据用户提供的场景类型与补充内容输出结果；当适合分条展示时，优先输出 JSON 数组，每项包含 title 和 text 字段。",
+      prompt,
     });
-
-    if (!response.ok) {
-      throw new Error(await parseError(response, "Text generation failed"));
-    }
-
-    return (await response.json()) as GenerateTextResult;
   } catch (e) {
-    throw new Error(
-      `Backend unavailable: ${e instanceof Error ? e.message : e}`,
-    );
+    throw new Error(`302.AI 文本生成失败: ${e instanceof Error ? e.message : e}`);
   }
 }

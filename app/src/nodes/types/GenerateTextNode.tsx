@@ -1,5 +1,6 @@
 import classNames from "classnames";
 import { T, useEditor, useValue } from "tldraw";
+import { createTextResultNodes, splitTextResult } from "../../agent/canvas/executionResults";
 import { apiGenerateText } from "../../api/pipelineApi";
 import { GenerateTextIcon } from "../../components/icons/GenerateTextIcon";
 import {
@@ -206,6 +207,11 @@ export class GenerateTextNodeDefinition extends NodeDefinition<GenerateTextNode>
       skillConfigJson,
       lastResultText: result.text,
     }));
+
+    const items = splitTextResult(result.text);
+    if (items.length > 0) {
+      createTextResultNodes(this.editor, shape, items);
+    }
 
     return { output: result.text };
   }

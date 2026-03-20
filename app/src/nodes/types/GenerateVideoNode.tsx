@@ -1,5 +1,7 @@
 import classNames from "classnames";
 import { T, useEditor, useValue } from "tldraw";
+import { createPreviewResultNode } from "../../agent/canvas/executionResults";
+import { VIDEO_MODEL_OPTIONS } from "../../api/provider302Models";
 import { apiGenerateVideo } from "../../api/pipelineApi";
 import { AddIcon } from "../../components/icons/AddIcon";
 import { GenerateIcon } from "../../components/icons/GenerateIcon";
@@ -29,12 +31,6 @@ import {
   STOP_EXECUTION,
   updateNode,
 } from "./shared";
-
-const VIDEO_MODELS = [
-  { value: "runway:gen3", label: "Runway Gen-3" },
-  { value: "luma:dream-machine", label: "Luma Dream Machine" },
-  { value: "kling:kling-v1", label: "Kling v1" },
-];
 
 const ASPECT_RATIO_OPTIONS = [
   { value: "16:9", label: "16:9 横屏" },
@@ -93,6 +89,29 @@ const VIDEO_MODES = [
 ] as const;
 
 type VideoMode = (typeof VIDEO_MODES)[number]["value"];
+
+const VIDEO_MODEL_CAPABILITIES: Record<string, VideoMode[]> = {
+  "viduq3-turbo": ["text_to_video"],
+  "jimeng-3.0": ["text_to_video"],
+  "kling-o3": ["first_last_frame"],
+  "doubao-seedance-1-5-pro-251215": ["text_to_video"],
+  "wan2.6-t2v": ["text_to_video"],
+  "wan2.6-i2v": ["first_last_frame"],
+  "hailuo-02": ["text_to_video"],
+  "veo3.1-pro": ["text_to_video"],
+  "sora-2-pro": ["text_to_video", "multi_image_reference"],
+  "wanx2.1-t2v-turbo": ["text_to_video"],
+  "wanx2.1-t2v-plus": ["text_to_video"],
+  "wan2.2-t2v-plus": ["text_to_video"],
+  "wan2.5-t2v-preview": ["text_to_video"],
+  "pika-2.2": ["multi_image_reference"],
+  "runway-gen3": ["text_to_video"],
+  "luma-dream-machine": ["text_to_video"],
+};
+
+function getSupportedVideoModes(model: string): VideoMode[] {
+  return VIDEO_MODEL_CAPABILITIES[model] ?? ["text_to_video"];
+}
 
 const VIDEO_REFERENCE_MIN = 1;
 const VIDEO_REFERENCE_MAX = 5;
@@ -173,7 +192,7 @@ export class GenerateVideoNodeDefinition extends NodeDefinition<GenerateVideoNod
   getDefault(): GenerateVideoNode {
     return {
       type: "generate_video",
-      model: "runway:gen3",
+      model: "viduq3-turbo",
       mode: "text_to_video",
       referenceImageCount: 1,
       resolution: "1280x720",
@@ -279,6 +298,10 @@ export class GenerateVideoNodeDefinition extends NodeDefinition<GenerateVideoNod
       lastResultMimeType: result.mimeType,
     }));
 
+    if (result.videoUrl) {
+      createPreviewResultNode(this.editor, shape, result.videoUrl, result.mimeType);
+    }
+
     return { output: result.videoUrl };
   }
 
@@ -362,6 +385,7 @@ function GenerateVideoNodeComponent({
 }: NodeComponentProps<GenerateVideoNode>) {
   const editor = useEditor();
   const resolutionOptions = getResolutionOptions(node.aspectRatio);
+  const supportedModes = getSupportedVideoModes(node.model);
   const inputValues = useValue(
     "video input values",
     () => getNodeInputPortValues(editor, shape.id),
@@ -410,17 +434,31 @@ function GenerateVideoNodeComponent({
         <span className="NodeInputRow-label">模型</span>
         <select
           value={node.model}
-          onChange={(e) =>
+          onChange={(e) => {
+            const nextModel = e.target.value;
+            const nextSupportedModes = getSupportedVideoModes(nextModel);
+            const nextMode = nextSupportedModes.includes(node.mode)
+              ? node.mode
+              : nextSupportedModes[0] ?? "text_to_video";
+            cleanupVideoModeConnections(editor, shape, node, nextMode, VIDEO_REFERENCE_MIN);
             updateNode<GenerateVideoNode>(
               editor,
               shape,
-              (n) => ({ ...n, model: e.target.value }),
+              (n) => ({
+                ...n,
+                model: nextModel,
+                mode: nextMode,
+                referenceImageCount:
+                  nextMode === "multi_image_reference"
+                    ? Math.max(VIDEO_REFERENCE_MIN, n.referenceImageCount)
+                    : n.referenceImageCount,
+              }),
               false,
-            )
-          }
+            );
+          }}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {VIDEO_MODELS.map((option) => (
+          {VIDEO_MODEL_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
@@ -434,7 +472,7 @@ function GenerateVideoNodeComponent({
           onChange={(e) => handleModeChange(e.target.value as VideoMode)}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {VIDEO_MODES.map((option) => (
+          {VIDEO_MODES.filter((option) => supportedModes.includes(option.value)).map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>

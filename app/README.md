@@ -110,6 +110,33 @@ pnpm install
 pnpm dev
 ```
 
+如果你要在演示版中直接调用 302.AI，请先在 `app` 目录创建本地环境文件：
+
+```bash
+cp .env.example .env
+```
+
+然后填写你的本地 API Key 与路由配置：
+
+```env
+VITE_302_API_KEY=你的302AI_API_KEY
+VITE_302_BASE_URL=https://api.302.ai
+
+VITE_302_ROUTE_CHAT_COMPLETIONS=/v1/chat/completions
+VITE_302_ROUTE_IMAGE_GENERATIONS=/v1/images/generations
+VITE_302_ROUTE_IMAGE_EDITS=/v1/images/edits
+VITE_302_ROUTE_VIDEO_GENERATIONS=/302/video/submit
+VITE_302_ROUTE_MUSIC_GENERATIONS=/302/music/submit
+VITE_302_TASK_STATUS_ROUTE_TEMPLATE=/302/tasks/{taskId}
+```
+
+说明：
+
+- 所有 302.AI 能力共用同一个 `VITE_302_BASE_URL`
+- 不同模型的差异主要通过不同路由、不同请求字段和不同模型名适配
+- `VITE_302_API_KEY` 只保存在本地 `.env` 中，不应提交到版本库
+- 当前方案是**演示版前端直连**，仅用于本地演示，不适合生产环境
+
 默认访问地址：
 
 ```text

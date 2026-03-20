@@ -51,6 +51,8 @@ app/
   - 维护节点白名单字段，是智能体可写边界的唯一事实源
 - `src/agent/canvas/CanvasNodeService.ts`
   - 提供节点创建、更新、删除、连线、查询能力
+- `src/agent/canvas/executionResults.ts`
+  - 负责运行后自动创建预览节点、文本结果节点，以及结果节点避让布局
 - `src/agent/canvas/CanvasProjectService.ts`
   - 提供本地存储保存、文件导出、快照读取能力
 - `src/agent/skill/MovieClawCanvasSkill.ts`
@@ -103,6 +105,20 @@ app/
 - `pages/` 使用 react-router 进行导航
 - 本地保存当前只依赖浏览器能力，不依赖后端与 syncer
 
+### 【演示版】302.AI 前端调用层
+- `src/api/pipelineApi.ts`
+  - 统一封装图片、视频、音频、文本节点的演示版调用入口
+  - 对真实 302.AI 调用失败场景保留占位结果回退，避免演示链路中断
+- `src/api/provider302.ts`
+  - 负责读取前端环境变量、调用 302.AI OpenAI 兼容接口、提交异步任务并轮询结果
+  - **注意：当前为前端直连方案，只适用于演示，不适用于生产环境**
+
+### 节点层补充
+- `src/nodes/types/TextResultNode.tsx`
+  - 作为运行后自动生成的文本展示节点，用于展示单条或拆分后的分镜/分场结果
+- `src/nodes/types/PreviewNode.tsx`
+  - 作为运行后自动生成的媒体预览节点，统一展示图片、视频、音频结果
+
 ## 当前设计原则
 
 - 智能体只能操作 `NodeDefinitions` 中已注册节点
@@ -113,6 +129,7 @@ app/
   - 所有纯前端逻辑需标注 `【演示版本】` 注释
   - 明确标记后续需接入后端的位置
   - 使用 localStorage 作为临时数据存储
+  - 允许前端直连 302.AI 以打通演示流程，但不得将该方案视为生产方案
 
 ## 容器化部署（演示版本）
 
@@ -145,4 +162,7 @@ docker-compose up -d
 - 新增 `src/agent/` 目录，收口画布 skill 与本地保存逻辑
 - `App.tsx` 新增 skill 注册与 5 秒自动保存
 - 新增 `docs/canvas-skill.md` 作为画布 skill 与扩展规范文档
+- 新增 `src/api/provider302.ts` 作为 302.AI 演示版前端直连适配层
+- 新增 `src/agent/canvas/executionResults.ts` 统一处理运行后结果节点创建与避让布局
+- 新增 `src/nodes/types/TextResultNode.tsx` 用于自动展示文本生成结果
 

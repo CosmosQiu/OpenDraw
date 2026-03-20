@@ -1,5 +1,7 @@
 import classNames from "classnames";
 import { T, useEditor, useValue } from "tldraw";
+import { createPreviewResultNode } from "../../agent/canvas/executionResults";
+import { IMAGE_MODEL_OPTIONS } from "../../api/provider302Models";
 import { apiGenerateImage } from "../../api/pipelineApi";
 import { GenerateIcon } from "../../components/icons/GenerateIcon";
 import {
@@ -28,12 +30,6 @@ import {
   STOP_EXECUTION,
   updateNode,
 } from "./shared";
-
-const IMAGE_MODELS = [
-  { value: "flux:flux-dev", label: "Flux Dev" },
-  { value: "flux:flux-schnell", label: "Flux Schnell" },
-  { value: "google:imagen-4-fast", label: "Imagen 4 Fast" },
-];
 
 const ASPECT_RATIO_OPTIONS = [
   { value: "1:1", label: "1:1 正方形" },
@@ -125,7 +121,7 @@ export class GenerateNodeDefinition extends NodeDefinition<GenerateNode> {
   getDefault(): GenerateNode {
     return {
       type: "generate",
-      model: "flux:flux-dev",
+      model: "gemini-3.1-flash-image-preview",
       resolution: "1024x1024",
       aspectRatio: "1:1",
       count: 1,
@@ -221,6 +217,15 @@ export class GenerateNodeDefinition extends NodeDefinition<GenerateNode> {
       selectedResultIndex: selectedIndex,
     }));
 
+    if (selectedImage) {
+      createPreviewResultNode(
+        this.editor,
+        shape,
+        selectedImage,
+        result.images[selectedIndex]?.mimeType ?? null,
+      );
+    }
+
     return { output: selectedImage };
   }
   getOutputInfo(
@@ -277,7 +282,7 @@ function GenerateNodeComponent({
           }
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {IMAGE_MODELS.map((option) => (
+          {IMAGE_MODEL_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>

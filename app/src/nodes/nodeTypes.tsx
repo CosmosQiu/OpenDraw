@@ -16,6 +16,7 @@ import { LoadImageNodeDefinition } from "./types/LoadImageNode";
 import { ModelNodeDefinition } from "./types/ModelNode";
 import { PreviewNodeDefinition } from "./types/PreviewNode";
 import { PromptNodeDefinition } from "./types/PromptNode";
+import { TextResultNodeDefinition } from "./types/TextResultNode";
 import { GenerateVideoNodeDefinition } from "./types/GenerateVideoNode";
 import { ReverseNodeDefinition } from "./types/ReverseNode";
 import {
@@ -37,6 +38,7 @@ export const NodeDefinitions = {
   load_document: LoadDocumentNodeDefinition,
   load_image: LoadImageNodeDefinition,
   preview: PreviewNodeDefinition,
+  text_result: TextResultNodeDefinition,
 } satisfies Record<string, NodeDefinitionConstructor<any>>;
 
 export type NodeType = T.TypeOf<typeof NodeType>;

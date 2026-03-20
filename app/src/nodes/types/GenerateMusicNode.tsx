@@ -1,5 +1,7 @@
 import classNames from "classnames";
 import { T, useEditor, useValue } from "tldraw";
+import { createPreviewResultNode } from "../../agent/canvas/executionResults";
+import { MUSIC_MODEL_OPTIONS } from "../../api/provider302Models";
 import { apiGenerateMusic } from "../../api/pipelineApi";
 import { GenerateIcon } from "../../components/icons/GenerateIcon";
 import {
@@ -28,12 +30,6 @@ import {
   updateNode,
 } from "./shared";
 
-const MUSIC_MODELS = [
-  { value: "suno:v4", label: "Suno v4" },
-  { value: "udio:v1.5", label: "Udio 1.5" },
-  { value: "stableaudio:2", label: "Stable Audio 2" },
-];
-
 export type GenerateMusicNode = T.TypeOf<typeof GenerateMusicNode>;
 export const GenerateMusicNode = T.object({
   type: T.literal("generate_music"),
@@ -56,7 +52,7 @@ export class GenerateMusicNodeDefinition extends NodeDefinition<GenerateMusicNod
   getDefault(): GenerateMusicNode {
     return {
       type: "generate_music",
-      model: "suno:v4",
+      model: "Suno V5",
       durationSeconds: 15,
       seed: Math.floor(Math.random() * 99999),
       lastResultUrl: null,
@@ -127,6 +123,10 @@ export class GenerateMusicNodeDefinition extends NodeDefinition<GenerateMusicNod
       lastResultMimeType: result.mimeType,
     }));
 
+    if (result.audioUrl) {
+      createPreviewResultNode(this.editor, shape, result.audioUrl, result.mimeType);
+    }
+
     return { output: result.audioUrl };
   }
 
@@ -179,7 +179,7 @@ function GenerateMusicNodeComponent({
           }
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {MUSIC_MODELS.map((option) => (
+          {MUSIC_MODEL_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
