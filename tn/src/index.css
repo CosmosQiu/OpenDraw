@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #222222;
+    border-radius: 3px;
+  }
+}
+
+@layer components {
+  /* 渐变文字 */
+  .gradient-text {
+    @apply bg-gradient-to-r from-accent-2 to-brand-pink bg-clip-text text-transparent;
+  }
+
+  /* 发光按钮 */
+  .btn-glow {
+    @apply inline-flex items-center gap-2 px-6 py-2.5 rounded-lg border-none
+           bg-gradient-to-r from-accent to-brand-pink text-white text-sm font-semibold
+           cursor-pointer transition-all duration-200
+           shadow-[0_0_20px_rgba(124,58,237,0.35)]
+           hover:shadow-[0_4px_28px_rgba(124,58,237,0.5)] hover:-translate-y-px;
+  }
+
+  /* 通用输入框 */
+  .input-base {
+    @apply w-full px-3.5 py-2.5 rounded-[6px] border border-border-2
+           bg-bg-3 text-white text-sm outline-none
+           transition-colors duration-200
+           focus:border-accent placeholder:text-[#555];
+  }
+
+  /* 通用按钮 */
+  .btn-primary {
+    @apply px-5 py-2 rounded-[6px] border-none bg-accent text-white text-sm font-medium
+           cursor-pointer transition-colors duration-200 hover:bg-accent-2 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply px-5 py-2 rounded-[6px] border border-border-2 bg-transparent text-[#a0a0a0]
+           text-sm cursor-pointer transition-all duration-200
+           hover:border-border-2 hover:text-white hover:bg-bg-3;
+  }
+
+  .btn-danger {
+    @apply px-5 py-2 rounded-[6px] border-none bg-brand-red text-white text-sm font-medium
+           cursor-pointer transition-colors duration-200 hover:bg-red-600;
+  }
+}
