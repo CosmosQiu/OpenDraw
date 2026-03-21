@@ -1,5 +1,6 @@
 import { Editor, TLShapeId } from "tldraw";
 import { DEFAULT_NODE_SPACING_PX } from "../../constants";
+import { getNodePortConnections } from "../../nodes/nodePorts";
 import { NodeShape } from "../../nodes/NodeShapeUtil";
 import { CanvasNodeService, createNodeShapeAtPoint } from "./CanvasNodeService";
 
@@ -14,7 +15,45 @@ export interface TextResultItem {
 
 export type PreviewResultDataType = "image" | "video" | "audio" | "text";
 
+function parseHistoryValues(value: unknown): string[] {
+  if (typeof value !== "string" || value.length === 0) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function findConnectedPreviewNode(
+  editor: Editor,
+  sourceShape: NodeShape,
+  previewDataType: PreviewResultDataType,
+): NodeShape | null {
+  let connections = [] as ReturnType<typeof getNodePortConnections>;
+  try {
+    connections = getNodePortConnections(editor, sourceShape).filter(
+      (connection) => connection.terminal === "start" && connection.ownPortId === "output",
+    );
+  } catch {
+    return null;
+  }
+  for (const connection of connections) {
+    const targetShape = editor.getShape(connection.connectedShapeId);
+    if (!targetShape || !editor.isShapeOfType(targetShape, "node")) continue;
+    const targetNode = targetShape.props.node;
+    if (targetNode.type !== "preview") continue;
+    if (targetNode.previewDataType !== previewDataType) continue;
+    return targetShape as NodeShape;
+  }
+  return null;
+}
+
 function listNodeShapes(editor: Editor): NodeShape[] {
+  if (typeof (editor as unknown as { getCurrentPageShapes?: unknown }).getCurrentPageShapes !== "function") {
+    return [];
+  }
   return editor
     .getCurrentPageShapes()
     .filter((shape): shape is NodeShape => editor.isShapeOfType(shape, "node"));
@@ -73,6 +112,38 @@ export function createPreviewResultNode(
   previewDataType: PreviewResultDataType,
   mediaType?: string | null,
 ) {
+  const editorLike = editor as unknown as {
+    createShape?: unknown;
+    getCurrentPageShapes?: unknown;
+  };
+  if (
+    typeof editorLike.createShape !== "function" ||
+    typeof editorLike.getCurrentPageShapes !== "function"
+  ) {
+    return sourceShape.id;
+  }
+
+  const existingPreview = findConnectedPreviewNode(editor, sourceShape, previewDataType);
+  if (existingPreview) {
+    const previewNode = existingPreview.props.node as Extract<NodeShape["props"]["node"], { type: "preview" }>;
+    const history = parseHistoryValues(previewNode.historyValuesJson);
+    const nextHistory = history[history.length - 1] === value ? history : [...history, value].slice(-20);
+    editor.updateShape({
+      id: existingPreview.id,
+      type: "node",
+      props: {
+        node: {
+          ...previewNode,
+          lastValue: value,
+          lastMediaType: mediaType ?? null,
+          historyValuesJson: JSON.stringify(nextHistory),
+          selectedHistoryIndex: Math.max(0, nextHistory.length - 1),
+        },
+      },
+    });
+    return existingPreview.id;
+  }
+
   const position = findAvailablePosition(editor, sourceShape, {
     width: DEFAULT_RESULT_NODE_WIDTH,
     height: DEFAULT_RESULT_NODE_HEIGHT,
@@ -88,6 +159,8 @@ export function createPreviewResultNode(
       previewDataType,
       lastValue: value,
       lastMediaType: mediaType ?? null,
+      historyValuesJson: JSON.stringify([value]),
+      selectedHistoryIndex: 0,
     },
   });
 

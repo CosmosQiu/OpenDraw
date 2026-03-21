@@ -32,7 +32,7 @@ describe("GenerateNodeDefinition.execute", () => {
       props: {
         node: {
           type: "generate",
-          model: "flux:flux-dev",
+          model: "gemini-3.1-flash-image-preview",
           resolution: "1024x768",
           aspectRatio: "4:3",
           count: 2,
@@ -59,16 +59,11 @@ describe("GenerateNodeDefinition.execute", () => {
     );
 
     expect(apiGenerateImageMock).toHaveBeenCalledWith({
-      model: "flux:flux-dev",
+      model: "gemini-3.1-flash-image-preview",
       prompt: "cat, cinematic",
       negativePrompt: "low quality",
       width: 1024,
       height: 768,
-      aspectRatio: "4:3",
-      count: 2,
-      steps: 28,
-      cfgScale: 9,
-      seed: 11,
       referenceImageUrl: "/api/images/ref_1",
     });
     expect(editor.updateShape).toHaveBeenCalledWith(
@@ -111,7 +106,7 @@ describe("GenerateNodeDefinition.execute", () => {
       props: {
         node: {
           type: "generate",
-          model: "flux:flux-dev",
+          model: "gemini-3.1-flash-image-preview",
           resolution: "1024x768",
           aspectRatio: "4:3",
           count: 1,

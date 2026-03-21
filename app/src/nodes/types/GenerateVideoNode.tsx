@@ -85,22 +85,23 @@ function parseResolution(resolution: string) {
 
 const VIDEO_MODES = [
   { value: "text_to_video", label: "文生视频" },
-  { value: "first_last_frame", label: "首尾帧视频" },
-  { value: "multi_image_reference", label: "多图参考" },
+  { value: "image_to_video", label: "图生视频" },
+  { value: "first_last_frame", label: "首尾帧" },
+  { value: "multi_image_reference", label: "多参考图生成" },
 ] as const;
 
 type VideoMode = (typeof VIDEO_MODES)[number]["value"];
 
 const VIDEO_MODEL_CAPABILITIES: Record<string, VideoMode[]> = {
-  "viduq3-turbo": ["text_to_video"],
+  "viduq3-turbo": ["text_to_video", "image_to_video", "first_last_frame", "multi_image_reference"],
   "jimeng-3.0": ["text_to_video"],
-  "kling-o3": ["first_last_frame"],
-  "doubao-seedance-1-5-pro-251215": ["text_to_video"],
+  "kling-o3": ["image_to_video", "multi_image_reference"],
+  "doubao-seedance-1-5-pro-251215": ["text_to_video", "image_to_video", "first_last_frame"],
   "wan2.6-t2v": ["text_to_video"],
-  "wan2.6-i2v": ["first_last_frame"],
+  "wan2.6-i2v": ["image_to_video"],
   "hailuo-02": ["text_to_video"],
   "veo3.1-pro": ["text_to_video"],
-  "sora-2-pro": ["text_to_video", "multi_image_reference"],
+  "sora-2-pro": ["text_to_video", "image_to_video"],
   "wanx2.1-t2v-turbo": ["text_to_video"],
   "wanx2.1-t2v-plus": ["text_to_video"],
   "wan2.2-t2v-plus": ["text_to_video"],
@@ -133,6 +134,13 @@ function getVideoInputDescriptors(node: GenerateVideoNode): VideoInputDescriptor
     multi: true,
   };
 
+  if (node.mode === "image_to_video") {
+    return [
+      prompt,
+      { portId: "source_image", label: "参考图", dataType: "image" },
+    ];
+  }
+
   if (node.mode === "first_last_frame") {
     return [
       prompt,
@@ -163,7 +171,7 @@ function getPortYForInputIndex(index: number) {
 function getTotalRowCount(node: GenerateVideoNode) {
   const inputCount = getVideoInputDescriptors(node).length;
   const referenceCountRow = node.mode === "multi_image_reference" ? 1 : 0;
-  const commonRows = 6;
+  const commonRows = 5;
   return commonRows + inputCount + referenceCountRow;
 }
 
@@ -171,7 +179,7 @@ export type GenerateVideoNode = T.TypeOf<typeof GenerateVideoNode>;
 export const GenerateVideoNode = T.object({
   type: T.literal("generate_video"),
   model: T.string,
-  mode: T.literalEnum("text_to_video", "first_last_frame", "multi_image_reference"),
+  mode: T.literalEnum("text_to_video", "image_to_video", "first_last_frame", "multi_image_reference"),
   referenceImageCount: T.number,
   resolution: T.string,
   aspectRatio: T.string,
@@ -254,6 +262,17 @@ export class GenerateVideoNodeDefinition extends NodeDefinition<GenerateVideoNod
     node: GenerateVideoNode,
     inputs: InputValues,
   ): Promise<ExecutionResult> {
+    const supportedModes = getSupportedVideoModes(node.model);
+    const resolvedMode = supportedModes.includes(node.mode)
+      ? node.mode
+      : (supportedModes[0] ?? "text_to_video");
+    if (resolvedMode !== node.mode) {
+      updateNode<GenerateVideoNode>(this.editor, shape, (n) => ({
+        ...n,
+        mode: resolvedMode,
+      }));
+    }
+
     const rawPrompt = inputs.prompt;
     const promptValues = Array.isArray(rawPrompt)
       ? rawPrompt
@@ -265,7 +284,8 @@ export class GenerateVideoNodeDefinition extends NodeDefinition<GenerateVideoNod
         .join(", ") || "default video prompt";
     const { width, height } = parseResolution(node.resolution);
 
-    const startImageUrl = (inputs.start_image as string | null) ?? undefined;
+    const sourceImageUrl = (inputs.source_image as string | null) ?? undefined;
+    const startImageUrl = (inputs.start_image as string | null) ?? sourceImageUrl;
     const endImageUrl = (inputs.end_image as string | null) ?? undefined;
     const referenceImageUrls = Array.from(
       { length: node.referenceImageCount },
@@ -273,19 +293,18 @@ export class GenerateVideoNodeDefinition extends NodeDefinition<GenerateVideoNod
     ).filter((value): value is string => typeof value === "string" && value.length > 0);
 
     const referenceImageUrl =
-      node.mode === "multi_image_reference"
+      resolvedMode === "multi_image_reference"
         ? referenceImageUrls[0]
         : undefined;
 
     const result = await apiGenerateVideo({
       model: node.model,
-      mode: node.mode,
+      mode: resolvedMode,
       prompt,
       width,
       height,
       aspectRatio: node.aspectRatio,
       durationSeconds: node.durationSeconds,
-      seed: node.seed,
       referenceImageUrl,
       startImageUrl,
       endImageUrl,
@@ -294,7 +313,6 @@ export class GenerateVideoNodeDefinition extends NodeDefinition<GenerateVideoNod
 
     updateNode<GenerateVideoNode>(this.editor, shape, (n) => ({
       ...n,
-      seed: result.seed,
       lastResultUrl: result.videoUrl,
       lastResultMimeType: result.mimeType,
     }));
@@ -586,25 +604,6 @@ function GenerateVideoNodeComponent({
           onPointerDown={(e) => e.stopPropagation()}
         />
         <span className="NodeRow-value">{node.durationSeconds}s</span>
-      </NodeRow>
-      <NodeRow className="NodeInputRow">
-        <span className="NodeInputRow-label">种子</span>
-        <input
-          type="text"
-          inputMode="numeric"
-          value={node.seed}
-          onChange={(e) => {
-            const v = parseInt(e.target.value, 10);
-            if (!isNaN(v)) {
-              updateNode<GenerateVideoNode>(editor, shape, (n) => ({
-                ...n,
-                seed: Math.max(0, v),
-              }));
-            }
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onFocus={() => editor.setSelectedShapes([shape.id])}
-        />
       </NodeRow>
     </>
   );

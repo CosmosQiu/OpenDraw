@@ -33,6 +33,7 @@ import {
   getNodePorts,
   getPortDataType,
 } from "../nodes/nodePorts";
+import { arePortDataTypesCompatible } from "../ports/portCompatibility";
 import { STOP_EXECUTION } from "../nodes/types/shared";
 import { getPortAtPoint } from "../ports/getPortAtPoint";
 import { findFirstCompatiblePort } from "../ports/portCompatibility";
@@ -188,7 +189,7 @@ export class ConnectionShapeUtil extends ShapeUtil<ConnectionShape> {
       dragDataType &&
       dragDataType !== "any" &&
       target.port.dataType !== "any" &&
-      target.port.dataType !== dragDataType;
+      !arePortDataTypesCompatible(dragDataType, target.port.dataType);
 
     const wouldCreateACycle =
       (target && nodesWhichWouldCreateACycle?.has(target.shape.id)) ?? false;

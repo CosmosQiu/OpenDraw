@@ -29,7 +29,7 @@ describe("GenerateVideoNodeDefinition.execute", () => {
       props: {
         node: {
           type: "generate_video",
-          model: "runway:gen3",
+          model: "kling-o3",
           mode: "multi_image_reference",
           referenceImageCount: 1,
           resolution: "1280x720",
@@ -49,14 +49,13 @@ describe("GenerateVideoNodeDefinition.execute", () => {
     });
 
     expect(apiGenerateVideoMock).toHaveBeenCalledWith({
-      model: "runway:gen3",
+      model: "kling-o3",
       mode: "multi_image_reference",
       prompt: "city, timelapse",
       width: 1280,
       height: 720,
       aspectRatio: "16:9",
       durationSeconds: 5,
-      seed: 11,
       referenceImageUrl: "/api/images/ref_1",
       referenceImageUrls: ["/api/images/ref_1"],
       startImageUrl: undefined,
@@ -66,7 +65,6 @@ describe("GenerateVideoNodeDefinition.execute", () => {
       expect.objectContaining({
         props: expect.objectContaining({
           node: expect.objectContaining({
-            seed: 42,
             lastResultUrl: "/api/videos/gen_clip.mp4",
             lastResultMimeType: "video/mp4",
           }),

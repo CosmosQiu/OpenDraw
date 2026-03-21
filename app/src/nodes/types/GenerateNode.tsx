@@ -135,7 +135,7 @@ export class GenerateNodeDefinition extends NodeDefinition<GenerateNode> {
     };
   }
   getBodyHeightPx() {
-    return NODE_ROW_HEIGHT_PX * 10 + NODE_IMAGE_PREVIEW_HEIGHT_PX;
+    return NODE_ROW_HEIGHT_PX * 6 + NODE_IMAGE_PREVIEW_HEIGHT_PX;
   }
   getPorts(_shape: NodeShape, _node: GenerateNode): Record<string, ShapePort> {
     const baseY = NODE_HEADER_HEIGHT_PX + NODE_ROW_HEADER_GAP_PX;
@@ -176,6 +176,16 @@ export class GenerateNodeDefinition extends NodeDefinition<GenerateNode> {
     node: GenerateNode,
     inputs: InputValues,
   ): Promise<ExecutionResult> {
+    const fallbackModel = IMAGE_MODEL_OPTIONS[0]?.value ?? node.model;
+    const resolvedModel = IMAGE_MODEL_OPTIONS.some((option) => option.value === node.model)
+      ? node.model
+      : fallbackModel;
+    if (resolvedModel !== node.model) {
+      updateNode<GenerateNode>(this.editor, shape, (n) => ({
+        ...n,
+        model: resolvedModel,
+      }));
+    }
     const rawPrompt = inputs.prompt;
     const promptValues = Array.isArray(rawPrompt)
       ? rawPrompt
@@ -190,16 +200,11 @@ export class GenerateNodeDefinition extends NodeDefinition<GenerateNode> {
     const { width, height } = parseResolution(node.resolution);
 
     const result = await apiGenerateImage({
-      model: node.model,
+      model: resolvedModel,
       prompt,
       negativePrompt: negativePrompt ?? undefined,
       width,
       height,
-      aspectRatio: node.aspectRatio,
-      count: node.count,
-      steps: node.steps,
-      cfgScale: node.cfgScale,
-      seed: node.seed,
       referenceImageUrl,
     });
     const selectedIndex = Math.min(
@@ -213,7 +218,6 @@ export class GenerateNodeDefinition extends NodeDefinition<GenerateNode> {
       lastResultUrl: selectedImage,
       lastResultUrlsJson: JSON.stringify(result.images.map((image) => image.url)),
       lastResultMimeType: result.images[selectedIndex]?.mimeType ?? null,
-      seed: result.seed,
       selectedResultIndex: selectedIndex,
     }));
 
@@ -251,6 +255,9 @@ function GenerateNodeComponent({
 }: NodeComponentProps<GenerateNode>) {
   const editor = useEditor();
   const resolutionOptions = getResolutionOptions(node.aspectRatio);
+  const selectedModel = IMAGE_MODEL_OPTIONS.some((option) => option.value === node.model)
+    ? node.model
+    : (IMAGE_MODEL_OPTIONS[0]?.value ?? node.model);
 
   const promptInput = useValue(
     "prompt input",
@@ -274,7 +281,7 @@ function GenerateNodeComponent({
       <NodeRow>
         <span className="NodeInputRow-label">模型</span>
         <select
-          value={node.model}
+          value={selectedModel}
           onChange={(e) =>
             updateNode<GenerateNode>(editor, shape, (n) => ({
               ...n,
@@ -421,87 +428,6 @@ function GenerateNodeComponent({
             </option>
           ))}
         </select>
-      </NodeRow>
-      <NodeRow className="NodeInputRow">
-        <span className="NodeInputRow-label">数量</span>
-        <input
-          type="range"
-          min="1"
-          max="4"
-          value={node.count}
-          onChange={(e) =>
-            updateNode<GenerateNode>(editor, shape, (n) => ({
-              ...n,
-              count: Number(e.target.value),
-            }), false)
-          }
-          onPointerDown={(e) => e.stopPropagation()}
-        />
-        <span className="NodeRow-value">{node.count}</span>
-      </NodeRow>
-      <NodeRow className="NodeInputRow">
-        <span className="NodeInputRow-label">步数</span>
-        <input
-          type="range"
-          min="1"
-          max="100"
-          value={node.steps}
-          onChange={(e) =>
-            updateNode<GenerateNode>(
-              editor,
-              shape,
-              (n) => ({
-                ...n,
-                steps: Number(e.target.value),
-              }),
-              false,
-            )
-          }
-          onPointerDown={(e) => e.stopPropagation()}
-        />
-        <span className="NodeRow-value">{node.steps}</span>
-      </NodeRow>
-      <NodeRow className="NodeInputRow">
-        <span className="NodeInputRow-label">CFG</span>
-        <input
-          type="range"
-          min="1"
-          max="30"
-          step="0.5"
-          value={node.cfgScale}
-          onChange={(e) =>
-            updateNode<GenerateNode>(
-              editor,
-              shape,
-              (n) => ({
-                ...n,
-                cfgScale: Number(e.target.value),
-              }),
-              false,
-            )
-          }
-          onPointerDown={(e) => e.stopPropagation()}
-        />
-        <span className="NodeRow-value">{node.cfgScale}</span>
-      </NodeRow>
-      <NodeRow className="NodeInputRow">
-        <span className="NodeInputRow-label">种子</span>
-        <input
-          type="text"
-          inputMode="numeric"
-          value={node.seed}
-          onChange={(e) => {
-            const v = parseInt(e.target.value, 10);
-            if (!isNaN(v)) {
-              updateNode<GenerateNode>(editor, shape, (n) => ({
-                ...n,
-                seed: Math.max(0, v),
-              }));
-            }
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onFocus={() => editor.setSelectedShapes([shape.id])}
-        />
       </NodeRow>
     </>
   );

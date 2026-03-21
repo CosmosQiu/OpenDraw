@@ -29,12 +29,25 @@ import {
 
 const PREVIEW_DATA_TYPES = ["image", "video", "audio", "text"] as const;
 
+function parseHistoryValues(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 export type PreviewNode = T.TypeOf<typeof PreviewNode>;
 export const PreviewNode = T.object({
   type: T.literal("preview"),
   previewDataType: T.literalEnum(...PREVIEW_DATA_TYPES),
   lastValue: T.string.nullable(),
   lastMediaType: T.string.nullable(),
+  historyValuesJson: T.string.nullable(),
+  selectedHistoryIndex: T.number,
 });
 
 export class PreviewNodeDefinition extends NodeDefinition<PreviewNode> {
@@ -44,19 +57,21 @@ export class PreviewNodeDefinition extends NodeDefinition<PreviewNode> {
   heading = "预览";
   icon = (<PreviewIcon />);
   category = "output";
-  resultKeys = ["previewDataType", "lastValue", "lastMediaType"] as const;
+  resultKeys = ["previewDataType", "lastValue", "lastMediaType", "historyValuesJson", "selectedHistoryIndex"] as const;
   getDefault(): PreviewNode {
     return {
       type: "preview",
       previewDataType: "image",
       lastValue: null,
       lastMediaType: null,
+      historyValuesJson: "[]",
+      selectedHistoryIndex: 0,
     };
   }
   getBodyHeightPx(_shape: NodeShape, node: PreviewNode) {
     return node.previewDataType === "text"
-      ? NODE_ROW_HEIGHT_PX * 4 + 96
-      : NODE_ROW_HEIGHT_PX + NODE_IMAGE_PREVIEW_HEIGHT_PX;
+      ? NODE_ROW_HEIGHT_PX * 5 + 96
+      : NODE_ROW_HEIGHT_PX * 2 + NODE_IMAGE_PREVIEW_HEIGHT_PX;
   }
   getPorts(_shape: NodeShape, node: PreviewNode): Record<string, ShapePort> {
     const baseY = NODE_HEADER_HEIGHT_PX + NODE_ROW_HEADER_GAP_PX;
@@ -96,10 +111,15 @@ export class PreviewNodeDefinition extends NodeDefinition<PreviewNode> {
         : nextValue
           ? inferMediaType(nextValue, node.lastMediaType)
           : null;
+    const history = parseHistoryValues(node.historyValuesJson);
+    const historyChanged = Boolean(nextValue) && history[history.length - 1] !== nextValue;
+    const nextHistory = historyChanged ? [...history, nextValue as string].slice(-20) : history;
     updateNode<PreviewNode>(this.editor, shape, (n) => ({
       ...n,
       lastValue: nextValue ?? null,
       lastMediaType: mediaType,
+      historyValuesJson: JSON.stringify(nextHistory),
+      selectedHistoryIndex: Math.max(0, nextHistory.length - 1),
     }));
     return { output: nextValue ?? null };
   }
@@ -131,15 +151,23 @@ function PreviewNodeComponent({
     () => getNodeInputPortValues(editor, shape.id).input,
     [editor, shape.id],
   );
+  const historyValues = parseHistoryValues(node.historyValuesJson);
+  const hasHistory = historyValues.length > 1;
+  const safeSelectedHistoryIndex =
+    node.selectedHistoryIndex >= 0 && node.selectedHistoryIndex < historyValues.length
+      ? node.selectedHistoryIndex
+      : Math.max(0, historyValues.length - 1);
 
-  const displayValue =
+  const liveValue =
     input && !input.isOutOfDate && input.value !== STOP_EXECUTION
       ? Array.isArray(input.value)
         ? input.value.filter((item): item is string => typeof item === "string").join("\n")
         : typeof input.value === "string"
           ? input.value
           : null
-      : node.lastValue;
+      : null;
+  const selectedHistoryValue = historyValues[safeSelectedHistoryIndex] ?? null;
+  const displayValue = selectedHistoryValue ?? liveValue ?? node.lastValue;
   const displayMediaType =
     node.previewDataType === "text"
       ? null
@@ -164,6 +192,27 @@ function PreviewNodeComponent({
           <span className="NodeRow-disconnected">未连接</span>
         )}
       </NodeRow>
+      {hasHistory ? (
+        <NodeRow>
+          <span className="NodeInputRow-label">历史生成</span>
+          <select
+            value={String(safeSelectedHistoryIndex)}
+            onChange={(e) =>
+              updateNode<PreviewNode>(editor, shape, (n) => ({
+                ...n,
+                selectedHistoryIndex: Number(e.target.value),
+              }), false)
+            }
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {historyValues.map((value, index) => (
+              <option key={`${index}-${value.slice(0, 20)}`} value={String(index)}>
+                {`第 ${index + 1} 次`}
+              </option>
+            ))}
+          </select>
+        </NodeRow>
+      ) : null}
       {node.previewDataType === "text" ? (
         <div
           className={classNames("GenerateTextNode-result")}

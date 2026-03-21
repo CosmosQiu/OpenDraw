@@ -10,17 +10,7 @@ import {
   resolve302VideoModel,
 } from "./provider302Models";
 
-const API_BASE_URL =
-  (import.meta.env.VITE_WORKER_API_BASE_URL as string | undefined)?.replace(
-    /\/$/,
-    "",
-  ) ?? "";
-
 const API_ERROR_PREFIX = "__pipeline_api_error__:";
-
-function buildApiUrl(path: string) {
-  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
-}
 
 export interface GenerateImageParams {
   model: string;
@@ -50,7 +40,7 @@ export interface GenerateImageResult {
 
 export interface GenerateVideoParams {
   model: string;
-  mode?: "text_to_video" | "first_last_frame" | "multi_image_reference";
+  mode?: "text_to_video" | "image_to_video" | "first_last_frame" | "multi_image_reference";
   prompt: string;
   width?: number;
   height?: number;
@@ -146,13 +136,6 @@ function normalizeSeed(seed?: number) {
   return seed ?? Math.floor(Math.random() * 100000);
 }
 
-async function parseError(response: Response, fallback: string) {
-  const err = await response.json().catch(() => ({ error: response.statusText }));
-  return (err as { error?: string; msg?: string }).error ??
-    (err as { msg?: string }).msg ??
-    fallback;
-}
-
 function createImagePlaceholderResult(
   params: GenerateImageParams,
 ): GenerateImageResult {
@@ -180,6 +163,8 @@ function createVideoPlaceholderResult(
   const modeLabel =
     params.mode === "first_last_frame"
       ? "First/Last Frame"
+      : params.mode === "image_to_video"
+        ? "Image to Video"
       : params.mode === "multi_image_reference"
         ? `Multi Reference (${params.referenceImageUrls?.length ?? 0})`
         : "Text to Video";
@@ -225,14 +210,10 @@ export async function apiGenerateImage(
     const result = await generate302Image({
       model: resolve302ImageModel(params.model),
       prompt: params.prompt,
-      negativePrompt: params.negativePrompt,
       size:
         params.width && params.height
           ? `${params.width}x${params.height}`
           : undefined,
-      count: params.count,
-      aspectRatio: params.aspectRatio,
-      seed: params.seed,
       referenceImageUrl: params.referenceImageUrl,
     });
     return result;
@@ -257,7 +238,6 @@ export async function apiGenerateVideo(
       mode: params.mode ?? "text_to_video",
       durationSeconds: params.durationSeconds,
       aspectRatio: params.aspectRatio,
-      seed: params.seed,
       startImageUrl: params.startImageUrl,
       endImageUrl: params.endImageUrl,
       referenceImageUrls: params.referenceImageUrls,
@@ -299,22 +279,18 @@ export async function apiGenerateMusic(
 
 export async function apiReverse(params: ReverseParams): Promise<ReverseResult> {
   try {
-    const response = await fetch(buildApiUrl("/api/reverse"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+    const reversePrompt = [
+      "你是一个专业的提示词反推助手。",
+      `媒体类型：${params.mediaType}`,
+      `媒体地址：${params.mediaUrl}`,
+      "请输出一段可用于二次生成的高质量中文提示词，包含主体、场景、镜头、光线、风格与细节，不要输出 JSON。",
+    ].join("\n");
+    const result = await generate302Text({
+      model: params.model,
+      systemPrompt: "你专注于根据媒体内容反推生成提示词，输出简洁可直接复用的提示词文本。",
+      prompt: reversePrompt,
     });
-
-    if (!response.ok) {
-      if (response.status === 404 || response.status >= 500) {
-        return createReversePlaceholderResult(params);
-      }
-      throw new Error(
-        `${API_ERROR_PREFIX}${await parseError(response, "Reverse prompt failed")}`,
-      );
-    }
-
-    return (await response.json()) as ReverseResult;
+    return { text: result.text };
   } catch (error) {
     if (
       error instanceof Error &&

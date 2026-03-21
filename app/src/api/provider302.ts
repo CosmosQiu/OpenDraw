@@ -1,10 +1,12 @@
 import { blobToDataUrl } from "../nodes/types/shared";
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;
-const DEFAULT_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_POLL_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_302_BASE_URL = "https://api.302.ai";
 const DEFAULT_STABLE_AUDIO_ROUTE = "/sd/v2beta/audio/stable-audio-2/text-to-audio?response_format=url";
 const DEFAULT_WAVESPEED_RESULT_SUFFIX = "/result";
+const ENABLE_302_DEBUG_LOG =
+  import.meta.env.DEV || String(import.meta.env.VITE_302_DEBUG ?? "").toLowerCase() === "true";
 
 type HttpMethod = "GET" | "POST";
 
@@ -40,11 +42,47 @@ async function resolveStrategyResult<T>(
   parseResult: (payload: JsonRecord) => T | null,
 ): Promise<T> {
   if (strategy.fetchResult) {
-    const resultPayload = await strategy.fetchResult(taskId, submitPayload);
-    const direct = parseResult(resultPayload);
-    if (direct) {
-      return direct;
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < DEFAULT_POLL_TIMEOUT_MS) {
+      try {
+        const resultPayload = await strategy.fetchResult(taskId, submitPayload);
+        const direct = parseResult(resultPayload);
+        if (direct) {
+          return direct;
+        }
+
+        const dataRecord = resultPayload.data as JsonRecord | undefined;
+        const status = extractTaskStatus(resultPayload);
+        if (["failed", "error", "cancelled", "canceled"].includes(status)) {
+          throw new Error(
+            String(
+              resultPayload.error ??
+                resultPayload.message ??
+                dataRecord?.error ??
+                "302.AI 异步任务失败",
+            ),
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+        const shouldRetry =
+          message.includes("http 500") ||
+          message.includes("http 502") ||
+          message.includes("http 503") ||
+          message.includes("http 504") ||
+          message.includes("internal server error") ||
+          message.includes("404") ||
+          message.includes("not found") ||
+          message.includes("expired") ||
+          message.includes("task_not_found");
+        if (!shouldRetry) {
+          throw error;
+        }
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, DEFAULT_POLL_INTERVAL_MS));
     }
+    throw new Error("302.AI 任务轮询超时");
   }
 
   return await pollTaskResult(taskId, {
@@ -64,8 +102,11 @@ function isHiggsLikeAudioModel(model: string) {
   return model.startsWith("udio-");
 }
 
-function aspectRatioToOrientation(aspectRatio: string | undefined) {
-  return aspectRatio === "9:16" ? "portrait" : "landscape";
+function toSunoMv(model: string) {
+  if (model === "suno-v5") return "chirp-crow";
+  if (model === "suno-v4.5") return "chirp-auk";
+  if (model === "suno-v4") return "chirp-v4";
+  return "chirp-v3-5";
 }
 
 function aspectRatioToVeoResolution(aspectRatio: string | undefined) {
@@ -93,30 +134,265 @@ async function fetchBinaryAsDataUrl(url: string): Promise<string> {
 }
 
 async function fetchJsonByAbsoluteUrl<T>(url: string): Promise<T> {
+  const normalizedUrl = normalizeRemoteFetchUrl(url);
   const { apiKey } = getProviderEnvConfig();
-  const response = await fetch(url, {
+  if (ENABLE_302_DEBUG_LOG) {
+    console.info("[302] request", { method: "GET", url: normalizedUrl });
+  }
+  const response = await fetch(normalizedUrl, {
     method: "GET",
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(text || `302.AI 请求失败: ${response.status}`);
+    if (ENABLE_302_DEBUG_LOG) {
+      console.error("[302] response error", {
+        method: "GET",
+        url: normalizedUrl,
+        status: response.status,
+        body: text,
+      });
+    }
+    throw new Error(`HTTP ${response.status}: ${text || response.statusText}`);
   }
-  return (await response.json()) as T;
+  const payload = (await response.json()) as T;
+  if (ENABLE_302_DEBUG_LOG) {
+    console.info("[302] response", { method: "GET", url: normalizedUrl, status: response.status, body: payload });
+  }
+  return payload;
+}
+
+function parseSize(size: string | undefined) {
+  const [width, height] = (size ?? "").split("x").map((value) => Number(value));
+  return {
+    width: Number.isFinite(width) ? width : 1024,
+    height: Number.isFinite(height) ? height : 1024,
+  };
+}
+
+function normalizeSeedreamSize(size: string | undefined) {
+  const { width, height } = parseSize(size);
+  return Math.max(width, height) >= 3000 ? "4K" : "2K";
+}
+
+function normalizeKlingImageResolution(size: string | undefined) {
+  const { width, height } = parseSize(size);
+  const maxSide = Math.max(width, height);
+  if (maxSide >= 3000) return "4k";
+  if (maxSide >= 2000) return "2k";
+  return "1k";
+}
+
+function normalizeViduResolution(size: string | undefined) {
+  const { width, height } = parseSize(size);
+  const maxSide = Math.max(width, height);
+  if (maxSide >= 3000) return "4K";
+  if (maxSide >= 2000) return "2K";
+  return "1080p";
+}
+
+function sanitizeAssetUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const sanitized = value.trim().replace(/^["'`\s]+|["'`\s]+$/g, "");
+  return sanitized.length > 0 ? sanitized : undefined;
+}
+
+function normalizeRemoteFetchUrl(url: string): string {
+  const sanitized = sanitizeAssetUrl(url) ?? url;
+  const { baseUrl } = getProviderEnvConfig();
+  if (!baseUrl.startsWith("/")) return sanitized;
+  try {
+    const parsed = new URL(sanitized);
+    if (parsed.hostname === "api.302.ai" || parsed.hostname === "api.302ai.cn") {
+      return `${trimTrailingSlash(baseUrl)}${parsed.pathname}${parsed.search}`;
+    }
+  } catch {}
+  return sanitized;
+}
+
+function normalizeSoraDuration(durationSeconds: number | undefined) {
+  if (durationSeconds === 8 || durationSeconds === 12) return durationSeconds;
+  return 4;
+}
+
+function normalizeWanDuration(durationSeconds: number | undefined) {
+  if (durationSeconds === 10 || durationSeconds === 15) return durationSeconds;
+  return 5;
+}
+
+function normalizeWanResolution(size: string | undefined, aspectRatio: string | undefined) {
+  if (size === "1920x1080" || size === "1080x1920") return "1080p";
+  if (size === "1280x720" || size === "720x1280") return "720p";
+  return aspectRatio === "9:16" ? "720p" : "720p";
+}
+
+function getImageRequestStrategy(request: Provider302ImageRequest) {
+  if (
+    request.model === "gemini-3.1-flash-image-preview" ||
+    request.model === "gemini-3-pro-image-preview"
+  ) {
+    return {
+      url: `/google/v1/models/${encodeURIComponent(request.model)}?response_format=url`,
+      contentType: "json" as const,
+      buildBody: () => ({
+        contents: [
+          {
+            parts: [
+              { text: request.prompt },
+              ...(request.referenceImageUrl ? [{ image_url: request.referenceImageUrl }] : []),
+            ],
+          },
+        ],
+        generationConfig: {
+          responseModalities: ["TEXT", "IMAGE"],
+          ...(request.aspectRatio ? { imageConfig: { aspectRatio: request.aspectRatio } } : {}),
+        },
+      }),
+    } satisfies RequestStrategy;
+  }
+
+  if (request.model === "doubao-seedream-5-0-260128") {
+    return {
+      url: "/doubao/images/generations",
+      contentType: "json" as const,
+      buildBody: () => ({
+        model: request.model,
+        prompt: request.prompt,
+        size: normalizeSeedreamSize(request.size),
+        response_format: "url",
+        ...(request.referenceImageUrl ? { image: [request.referenceImageUrl] } : {}),
+      }),
+    } satisfies RequestStrategy;
+  }
+
+  if (request.model === "kling-image-o3") {
+    return {
+      url: "/klingai/mmu_omni_3_image",
+      contentType: "json" as const,
+      buildBody: () => ({
+        prompt: request.prompt,
+        aspect_ratio: request.aspectRatio ?? "1:1",
+        img_resolution: normalizeKlingImageResolution(request.size),
+        imageCount: 1,
+        ...(request.referenceImageUrl ? { images: [request.referenceImageUrl] } : {}),
+      }),
+      resolveTaskId: (payload) =>
+        ((payload.data as JsonRecord | undefined)?.task_id as string | undefined) ??
+        extractTaskId(payload as TaskSubmitResponse),
+      fetchResult: async (taskId) =>
+        await fetchJson<JsonRecord>(
+          buildUrl(getProviderEnvConfig().baseUrl, `/klingai/task/${encodeURIComponent(taskId)}/fetch`),
+          "GET",
+        ),
+    } satisfies RequestStrategy;
+  }
+
+  if (request.model === "grok-imagine-image") {
+    return {
+      url: request.referenceImageUrl
+        ? "/302/submit/grok-imagine-image-edit"
+        : "/302/submit/grok-imagine-image",
+      contentType: "json" as const,
+      buildBody: () => ({
+        prompt: request.prompt,
+        aspect_ratio: request.aspectRatio ?? "1:1",
+        ...(request.referenceImageUrl ? { image_url: request.referenceImageUrl } : {}),
+      }),
+    } satisfies RequestStrategy;
+  }
+
+  if (request.model === "z-image") {
+    return {
+      url: "/302/submit/z-image",
+      contentType: "json" as const,
+      buildBody: () => {
+        const { width, height } = parseSize(request.size);
+        return {
+          prompt: request.prompt,
+          image_size: { width, height },
+          output_format: "png",
+        };
+      },
+    } satisfies RequestStrategy;
+  }
+
+  if (request.model === "flux-2-klein-4b") {
+    return {
+      url: "/flux/v1/flux-2-klein-4b",
+      contentType: "json" as const,
+      buildBody: () => {
+        const { width, height } = parseSize(request.size);
+        return {
+          prompt: request.prompt,
+          width,
+          height,
+          sync: true,
+          ...(request.referenceImageUrl ? { input_image: request.referenceImageUrl } : {}),
+        };
+      },
+      resolveTaskId: (payload) => (payload.id as string | undefined) ?? extractTaskId(payload as TaskSubmitResponse),
+      fetchResult: async (_taskId, submitPayload) => {
+        const pollingUrl = submitPayload.polling_url;
+        if (typeof pollingUrl !== "string" || pollingUrl.length === 0) {
+          return submitPayload;
+        }
+        return await fetchJsonByAbsoluteUrl<JsonRecord>(pollingUrl);
+      },
+    } satisfies RequestStrategy;
+  }
+
+  if (request.model === "viduq2") {
+    return {
+      url: "/vidu/ent/v2/reference2image",
+      contentType: "json" as const,
+      buildBody: () => ({
+        model: "viduq2",
+        prompt: request.prompt,
+        resolution: normalizeViduResolution(request.size),
+        aspect_ratio: request.aspectRatio ?? "auto",
+        images: request.referenceImageUrl ? [request.referenceImageUrl] : [],
+      }),
+      resolveTaskId: (payload) => (payload.task_id as string | undefined) ?? extractTaskId(payload as TaskSubmitResponse),
+      fetchResult: async (taskId) =>
+        await fetchJson<JsonRecord>(
+          buildUrl(getProviderEnvConfig().baseUrl, `/vidu/ent/v2/tasks/${encodeURIComponent(taskId)}/creations`),
+          "GET",
+        ),
+    } satisfies RequestStrategy;
+  }
+
+  return {
+    url: request.referenceImageUrl ? getProviderEnvConfig().routes.imageEdits : getProviderEnvConfig().routes.imageGenerations,
+    contentType: "json" as const,
+    buildBody: () => ({
+      model: request.model,
+      prompt: request.prompt,
+      size: request.size,
+    }),
+  } satisfies RequestStrategy;
 }
 
 function getVideoRequestStrategy(request: Provider302VideoRequest) {
-  if (request.model === "kling-o3" && request.mode === "first_last_frame") {
+  const startImageUrl = sanitizeAssetUrl(request.startImageUrl);
+  const endImageUrl = sanitizeAssetUrl(request.endImageUrl);
+  const referenceImageUrls = (request.referenceImageUrls ?? [])
+    .map((url) => sanitizeAssetUrl(url))
+    .filter((url): url is string => Boolean(url));
+
+  if (
+    request.model === "kling-o3" &&
+    (request.mode === "image_to_video" || request.mode === "first_last_frame")
+  ) {
     return {
       url: "/klingai/m2v_21_img2video_hq",
       contentType: "form" as const,
       buildBody: () => {
         const form = new FormData();
-        if (request.startImageUrl) {
-          form.append("input_image", request.startImageUrl);
+        if (startImageUrl) {
+          form.append("input_image", startImageUrl);
         }
-        if (request.endImageUrl) {
-          form.append("tail_image", request.endImageUrl);
+        if (request.mode === "first_last_frame" && endImageUrl) {
+          form.append("tail_image", endImageUrl);
         }
         form.append("prompt", request.prompt);
         form.append("negative_prompt", "");
@@ -124,7 +400,41 @@ function getVideoRequestStrategy(request: Provider302VideoRequest) {
         form.append("enable_audio", "false");
         return form;
       },
+      resolveTaskId: (payload: JsonRecord) =>
+        (((payload.data as JsonRecord | undefined)?.task as JsonRecord | undefined)?.id as string | undefined) ??
+        extractTaskId(payload as TaskSubmitResponse),
+      fetchResult: async (taskId: string) =>
+        await fetchJson<JsonRecord>(
+          buildUrl(getProviderEnvConfig().baseUrl, `/klingai/task/${encodeURIComponent(taskId)}/fetch`),
+          "GET",
+        ),
     };
+  }
+
+  if (request.model === "kling-o3" && request.mode === "multi_image_reference") {
+    return {
+      url: "/klingai/multi-image2video",
+      contentType: "json" as const,
+      buildBody: () => ({
+        model_name: "kling-v1-6",
+        image_list: referenceImageUrls
+          .slice(0, 4)
+          .map((image) => ({ image })),
+        mode: "std",
+        prompt: request.prompt,
+        aspect_ratio: request.aspectRatio ?? "16:9",
+        duration: request.durationSeconds === 10 ? 10 : 5,
+        enable_audio: false,
+      }),
+      resolveTaskId: (payload) =>
+        ((payload.data as JsonRecord | undefined)?.task_id as string | undefined) ??
+        extractTaskId(payload as TaskSubmitResponse),
+      fetchResult: async (taskId) =>
+        await fetchJson<JsonRecord>(
+          buildUrl(getProviderEnvConfig().baseUrl, `/klingai/task/${encodeURIComponent(taskId)}/fetch`),
+          "GET",
+        ),
+    } satisfies RequestStrategy;
   }
 
   if (request.model === "jimeng-3.0") {
@@ -134,7 +444,7 @@ function getVideoRequestStrategy(request: Provider302VideoRequest) {
       buildBody: () => ({
         req_key: "jimeng_t2v_v30",
         prompt: request.prompt,
-        seed: request.seed ?? -1,
+        ...(request.seed != null ? { seed: request.seed } : {}),
         frames: durationToJimengFrames(request.durationSeconds),
         aspect_ratio: request.aspectRatio ?? "16:9",
       }),
@@ -175,7 +485,9 @@ function getVideoRequestStrategy(request: Provider302VideoRequest) {
         form.append("ingredientsMode", "reference");
         form.append("promptText", request.prompt);
         form.append("negativePrompt", "");
-        form.append("seed", String(request.seed ?? ""));
+        if (request.seed != null) {
+          form.append("seed", String(request.seed));
+        }
         form.append("resolution", "1080p");
         form.append("duration", String(request.durationSeconds ?? 5));
         form.append("aspectRatio", request.aspectRatio ?? "16:9");
@@ -198,7 +510,9 @@ function getVideoRequestStrategy(request: Provider302VideoRequest) {
         const form = new FormData();
         form.append("text_prompt", request.prompt);
         form.append("seconds", String(request.durationSeconds ?? 10));
-        form.append("seed", String(request.seed ?? ""));
+        if (request.seed != null) {
+          form.append("seed", String(request.seed));
+        }
         return form;
       },
       resolveTaskId: (payload) => ((payload.task as JsonRecord | undefined)?.id as string | undefined) ?? extractTaskId(payload as TaskSubmitResponse),
@@ -210,21 +524,72 @@ function getVideoRequestStrategy(request: Provider302VideoRequest) {
     } satisfies RequestStrategy;
   }
 
-  if (request.model === "sora-2-pro") {
+  if (request.model === "sora-2-pro" || request.model === "sora-2") {
     return {
-      url: "/sora/v2/video",
+      url:
+        request.mode === "text_to_video"
+          ? "/ws/api/v3/openai/sora-2/text-to-video-pro"
+          : "/ws/api/v3/openai/sora-2/image-to-video-pro",
       contentType: "json" as const,
       buildBody: () => ({
-        model: "sora-2",
-        orientation: aspectRatioToOrientation(request.aspectRatio),
         prompt: request.prompt,
-        size: request.aspectRatio === "9:16" ? "720x1280" : "1280x720",
-        duration: request.durationSeconds ?? 10,
-        ...(request.referenceImageUrls?.length ? { images: request.referenceImageUrls } : {}),
+        duration: normalizeSoraDuration(request.durationSeconds),
+        ...(request.mode === "text_to_video"
+          ? { size: request.aspectRatio === "9:16" ? "720*1280" : "1280*720" }
+          : { resolution: "1080p" }),
+        ...(request.mode === "image_to_video" && startImageUrl
+          ? { image: startImageUrl }
+          : {}),
+        ...(request.mode === "first_last_frame" && startImageUrl && endImageUrl
+          ? { image: startImageUrl, image_end: endImageUrl }
+          : {}),
+        ...(request.mode === "first_last_frame" && startImageUrl && !endImageUrl
+          ? { image: startImageUrl }
+          : {}),
+        ...(request.mode === "multi_image_reference" && referenceImageUrls.length
+          ? { image: referenceImageUrls[0] }
+          : {}),
       }),
       resolveTaskId: (payload) => ((payload.data as JsonRecord | undefined)?.id as string | undefined) ?? extractTaskId(payload as TaskSubmitResponse),
-      fetchResult: async (taskId) =>
-        await fetchJsonByAbsoluteUrl<JsonRecord>(`${trimTrailingSlash(getProviderEnvConfig().baseUrl)}/ws/api/v3/predictions/${encodeURIComponent(taskId)}${DEFAULT_WAVESPEED_RESULT_SUFFIX}`),
+      fetchResult: async (taskId, submitPayload) =>
+        await fetchJsonByAbsoluteUrl<JsonRecord>(resolveWavespeedResultUrl(taskId, submitPayload)),
+    } satisfies RequestStrategy;
+  }
+
+  if (request.model === "wan2.6-i2v" || request.model === "alibaba/wan-2.6/image-to-video") {
+    return {
+      url: "/ws/api/v3/alibaba/wan-2.6/image-to-video",
+      contentType: "json" as const,
+      buildBody: () => ({
+        image: startImageUrl ?? referenceImageUrls[0],
+        prompt: request.prompt,
+        resolution: normalizeWanResolution(undefined, request.aspectRatio),
+        duration: normalizeWanDuration(request.durationSeconds),
+        shot_type: "single",
+        enable_prompt_expansion: true,
+        seed: request.seed ?? -1,
+      }),
+      resolveTaskId: (payload) => ((payload.data as JsonRecord | undefined)?.id as string | undefined) ?? extractTaskId(payload as TaskSubmitResponse),
+      fetchResult: async (taskId, submitPayload) =>
+        await fetchJsonByAbsoluteUrl<JsonRecord>(resolveWavespeedResultUrl(taskId, submitPayload)),
+    } satisfies RequestStrategy;
+  }
+
+  if (request.model === "wan2.6-t2v" || request.model === "alibaba/wan-2.6/text-to-video") {
+    return {
+      url: "/ws/api/v3/alibaba/wan-2.6/text-to-video",
+      contentType: "json" as const,
+      buildBody: () => ({
+        prompt: request.prompt,
+        size: normalizeVideoSize(undefined, request.aspectRatio),
+        duration: normalizeWanDuration(request.durationSeconds),
+        shot_type: "single",
+        enable_prompt_expansion: true,
+        seed: request.seed ?? -1,
+      }),
+      resolveTaskId: (payload) => ((payload.data as JsonRecord | undefined)?.id as string | undefined) ?? extractTaskId(payload as TaskSubmitResponse),
+      fetchResult: async (taskId, submitPayload) =>
+        await fetchJsonByAbsoluteUrl<JsonRecord>(resolveWavespeedResultUrl(taskId, submitPayload)),
     } satisfies RequestStrategy;
   }
 
@@ -240,8 +605,8 @@ function getVideoRequestStrategy(request: Provider302VideoRequest) {
         resolution: aspectRatioToVeoResolution(request.aspectRatio),
       }),
       resolveTaskId: (payload) => ((payload.data as JsonRecord | undefined)?.id as string | undefined) ?? extractTaskId(payload as TaskSubmitResponse),
-      fetchResult: async (taskId) =>
-        await fetchJsonByAbsoluteUrl<JsonRecord>(`${trimTrailingSlash(getProviderEnvConfig().baseUrl)}/ws/api/v3/predictions/${encodeURIComponent(taskId)}${DEFAULT_WAVESPEED_RESULT_SUFFIX}`),
+      fetchResult: async (taskId, submitPayload) =>
+        await fetchJsonByAbsoluteUrl<JsonRecord>(resolveWavespeedResultUrl(taskId, submitPayload)),
     } satisfies RequestStrategy;
   }
 
@@ -252,20 +617,23 @@ function getVideoRequestStrategy(request: Provider302VideoRequest) {
       model: request.model,
       input: {
         prompt: request.prompt,
-        ...(request.mode === "first_last_frame" && request.startImageUrl
-          ? { image_url: request.startImageUrl, last_image_url: request.endImageUrl }
+        ...(request.mode === "first_last_frame" && startImageUrl
+          ? { image_url: startImageUrl, last_image_url: endImageUrl }
           : {}),
-        ...(request.mode === "multi_image_reference" && request.referenceImageUrls?.[0]
-          ? { image_url: request.referenceImageUrls[0] }
+        ...(request.mode === "image_to_video" && startImageUrl
+          ? { image_url: startImageUrl }
+          : {}),
+        ...(request.mode === "multi_image_reference" && referenceImageUrls[0]
+          ? { image_url: referenceImageUrls[0] }
           : {}),
       },
       parameters: {
         size: normalizeVideoSize(undefined, request.aspectRatio),
         duration: request.durationSeconds ? String(request.durationSeconds) : undefined,
         prompt_extend: true,
-        seed: request.seed,
-        mode: request.mode,
-        reference_image_urls: request.referenceImageUrls,
+        ...(request.seed != null ? { seed: request.seed } : {}),
+        mode: request.mode === "image_to_video" ? "first_last_frame" : request.mode,
+        reference_image_urls: referenceImageUrls,
       },
     }),
   };
@@ -315,14 +683,14 @@ function getMusicRequestStrategy(request: Provider302MusicRequest) {
       isSunoModel(request.model) && !request.referenceAudioUrl
         ? {
             gpt_description_prompt: request.prompt,
-            mv: "chirp-crow",
+            mv: toSunoMv(request.model),
             make_instrumental: true,
           }
         : {
             prompt: request.prompt,
             title: request.prompt.slice(0, 30) || "MovieClaw Demo",
             tags: "cinematic, soundtrack",
-            mv: "chirp-crow",
+            mv: isSunoModel(request.model) ? toSunoMv(request.model) : "chirp-crow",
             make_instrumental: !request.referenceAudioUrl,
             metadata: {
               duration_seconds: request.durationSeconds,
@@ -331,6 +699,16 @@ function getMusicRequestStrategy(request: Provider302MusicRequest) {
               create_mode: request.referenceAudioUrl ? "custom" : "auto",
             },
           },
+    resolveTaskId: (payload: JsonRecord) =>
+      (typeof payload.data === "string" ? payload.data : null) ??
+      extractTaskId(payload as TaskSubmitResponse),
+    fetchResult: isSunoModel(request.model)
+      ? async (taskId: string) =>
+          await fetchJson<JsonRecord>(
+            buildUrl(getProviderEnvConfig().baseUrl, `/suno/fetch/${encodeURIComponent(taskId)}`),
+            "GET",
+          )
+      : undefined,
   };
 }
 
@@ -346,7 +724,7 @@ interface TaskSubmitResponse {
     taskId?: string;
     id?: string;
     [key: string]: unknown;
-  };
+  } | string;
   [key: string]: unknown;
 }
 
@@ -376,7 +754,7 @@ export interface Provider302ImageResult {
 export interface Provider302VideoRequest {
   model: string;
   prompt: string;
-  mode: "text_to_video" | "first_last_frame" | "multi_image_reference";
+  mode: "text_to_video" | "image_to_video" | "first_last_frame" | "multi_image_reference";
   durationSeconds?: number;
   aspectRatio?: string;
   seed?: number;
@@ -482,6 +860,9 @@ function buildHeaders(apiKey: string, contentType = "application/json") {
 async function fetchJson<T>(url: string, method: HttpMethod, body?: JsonRecord): Promise<T> {
   const { apiKey } = getProviderEnvConfig();
   const headers = buildHeaders(apiKey);
+  if (ENABLE_302_DEBUG_LOG) {
+    console.info("[302] request", { method, url, body });
+  }
   const response = await fetch(url, {
     method,
     headers,
@@ -490,10 +871,17 @@ async function fetchJson<T>(url: string, method: HttpMethod, body?: JsonRecord):
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(text || `302.AI 请求失败: ${response.status}`);
+    if (ENABLE_302_DEBUG_LOG) {
+      console.error("[302] response error", { method, url, status: response.status, body: text });
+    }
+    throw new Error(`HTTP ${response.status}: ${text || response.statusText}`);
   }
 
-  return (await response.json()) as T;
+  const payload = (await response.json()) as T;
+  if (ENABLE_302_DEBUG_LOG) {
+    console.info("[302] response", { method, url, status: response.status, body: payload });
+  }
+  return payload;
 }
 
 async function fetchWithBody<T>(
@@ -507,6 +895,17 @@ async function fetchWithBody<T>(
     contentType === "form"
       ? { Authorization: `Bearer ${apiKey}` }
       : buildHeaders(apiKey);
+  if (ENABLE_302_DEBUG_LOG) {
+    console.info("[302] request", {
+      method,
+      url,
+      contentType,
+      body:
+        contentType === "form"
+          ? "[FormData]"
+          : body,
+    });
+  }
   const response = await fetch(url, {
     method,
     headers,
@@ -520,27 +919,78 @@ async function fetchWithBody<T>(
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(text || `302.AI 请求失败: ${response.status}`);
+    if (ENABLE_302_DEBUG_LOG) {
+      console.error("[302] response error", { method, url, status: response.status, body: text });
+    }
+    throw new Error(`HTTP ${response.status}: ${text || response.statusText}`);
   }
 
-  return (await response.json()) as T;
+  const payload = (await response.json()) as T;
+  if (ENABLE_302_DEBUG_LOG) {
+    console.info("[302] response", { method, url, status: response.status, body: payload });
+  }
+  return payload;
+}
+
+function resolveWavespeedResultUrl(taskId: string, submitPayload: JsonRecord): string {
+  const data = submitPayload.data as JsonRecord | undefined;
+  const urls = data?.urls as JsonRecord | undefined;
+  const getUrl = urls?.get;
+  if (typeof getUrl === "string" && getUrl.length > 0) {
+    return getUrl;
+  }
+  return `${trimTrailingSlash(getProviderEnvConfig().baseUrl)}/ws/api/v3/predictions/${encodeURIComponent(taskId)}${DEFAULT_WAVESPEED_RESULT_SUFFIX}`;
 }
 
 function extractTaskId(payload: TaskSubmitResponse): string | null {
+  const dataRecord =
+    typeof payload.data === "string"
+      ? null
+      : (payload.data as JsonRecord | undefined);
   return (
-    ((payload.data as JsonRecord | undefined)?.task as JsonRecord | undefined)?.id as string | undefined ??
+    ((dataRecord?.task as JsonRecord | undefined)?.id as string | undefined) ??
     payload.output?.task_id ??
     payload.taskId ??
     payload.id ??
     (typeof payload.data === "string" ? payload.data : undefined) ??
-    payload.data?.taskId ??
-    payload.data?.id ??
+    (dataRecord?.taskId as string | undefined) ??
+    (dataRecord?.id as string | undefined) ??
     null
   );
 }
 
 function normalizeTaskStatus(value: unknown): string {
-  return String(value ?? "").toLowerCase();
+  const status = String(value ?? "").trim().toLowerCase();
+  if (status === "99") {
+    return "completed";
+  }
+  return status;
+}
+
+function extractTaskStatus(payload: JsonRecord): string {
+  const dataRecord = payload.data as JsonRecord | undefined;
+  const outputRecord = payload.output as JsonRecord | undefined;
+  const taskRecord = dataRecord?.task as JsonRecord | undefined;
+  const workRecord = Array.isArray(dataRecord?.works)
+    ? (dataRecord.works[0] as JsonRecord | undefined)
+    : undefined;
+  const workTaskRecord = workRecord?.task as JsonRecord | undefined;
+  const candidates = [
+    taskRecord?.status,
+    workTaskRecord?.status,
+    dataRecord?.task_status,
+    outputRecord?.task_status,
+    dataRecord?.status,
+    payload.state,
+    payload.status,
+  ];
+  for (const value of candidates) {
+    const normalized = normalizeTaskStatus(value);
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+  return "";
 }
 
 function normalizeVideoSize(size: string | undefined, aspectRatio: string | undefined): string | undefined {
@@ -586,14 +1036,7 @@ async function pollTaskResult<T>(taskId: string, options: PollTaskOptions<T>): P
       return parsed;
     }
 
-    const output = payload.output as JsonRecord | undefined;
-
-    const status = normalizeTaskStatus(
-      payload.status ??
-        payload.state ??
-        output?.task_status ??
-        (payload.data as JsonRecord | undefined)?.status,
-    );
+    const status = extractTaskStatus(payload);
     if (["failed", "error", "cancelled", "canceled"].includes(status)) {
       throw new Error(
         String(
@@ -623,8 +1066,34 @@ async function fetchAssetAsDataUrl(url: string): Promise<string> {
 function pickMediaList(payload: JsonRecord): Array<{ url: string; mimeType: string }> {
   const dataRecord = payload.data as JsonRecord | undefined;
   const taskResultRecord = dataRecord?.task_result as JsonRecord | undefined;
+  const works = Array.isArray(dataRecord?.works)
+    ? (dataRecord.works as JsonRecord[]).map((work) => {
+        const resourceRecord = work.resource as JsonRecord | undefined;
+        return {
+          url:
+            (typeof resourceRecord?.resource === "string" ? resourceRecord.resource : undefined) ??
+            (typeof work.video_url === "string" ? work.video_url : undefined) ??
+            (typeof work.url === "string" ? work.url : undefined),
+          mimeType: "video/mp4",
+        };
+      })
+    : null;
+  const candidates = Array.isArray(payload.candidates)
+    ? (payload.candidates as JsonRecord[])
+        .flatMap((candidate) => {
+          const content = candidate.content as JsonRecord | undefined;
+          return Array.isArray(content?.parts) ? (content.parts as JsonRecord[]) : [];
+        })
+        .map((part) => ({ url: part.url }))
+    : null;
+  const creations = Array.isArray(payload.creations)
+    ? (payload.creations as JsonRecord[]).map((item) => ({ url: item.url }))
+    : null;
   const raw =
     (Array.isArray(payload.data) ? payload.data : null) ??
+    (Array.isArray(dataRecord?.data)
+      ? (dataRecord.data as unknown[])
+      : null) ??
     (Array.isArray(dataRecord?.outputs)
       ? (dataRecord.outputs as unknown[])
       : null) ??
@@ -634,8 +1103,11 @@ function pickMediaList(payload: JsonRecord): Array<{ url: string; mimeType: stri
     (Array.isArray(dataRecord?.results)
       ? (dataRecord.results as unknown[])
       : null) ??
+    works ??
     (Array.isArray(payload.results) ? payload.results : null) ??
     (Array.isArray(payload.images) ? payload.images : null) ??
+    candidates ??
+    creations ??
     (Array.isArray(payload.image_urls)
       ? (payload.image_urls as string[]).map((url) => ({ url }))
       : null) ??
@@ -643,6 +1115,14 @@ function pickMediaList(payload: JsonRecord): Array<{ url: string; mimeType: stri
 
   return raw
     .map((item) => {
+      if (typeof item === "string") {
+        const directUrl = sanitizeAssetUrl(item);
+        if (!directUrl) return null;
+        return {
+          url: directUrl,
+          mimeType: "application/octet-stream",
+        };
+      }
       const record = item as JsonRecord;
       const url =
         typeof record.url === "string"
@@ -660,9 +1140,10 @@ function pickMediaList(payload: JsonRecord): Array<{ url: string; mimeType: stri
                   : typeof record.url === "string"
                     ? record.url
                 : null;
-      if (!url) return null;
+      const sanitizedUrl = sanitizeAssetUrl(url ?? undefined);
+      if (!sanitizedUrl) return null;
       return {
-        url,
+        url: sanitizedUrl,
         mimeType:
           typeof record.mimeType === "string"
             ? record.mimeType
@@ -712,23 +1193,19 @@ export async function generate302Text(request: Provider302TextRequest): Promise<
 
 export async function generate302Image(request: Provider302ImageRequest): Promise<Provider302ImageResult> {
   const config = getProviderEnvConfig();
-  const url = buildUrl(
-    config.baseUrl,
-    request.referenceImageUrl ? config.routes.imageEdits : config.routes.imageGenerations,
+  const strategy = getImageRequestStrategy(request);
+  const defaultBody = strategy.buildBody();
+  const payload = await fetchWithBody<JsonRecord>(
+    buildUrl(config.baseUrl, strategy.url),
+    "POST",
+    strategy.contentType === "json" && strategy.url === (request.referenceImageUrl ? config.routes.imageEdits : config.routes.imageGenerations) && request.referenceImageUrl
+      ? {
+          ...(defaultBody as JsonRecord),
+          image: await fetchAssetAsDataUrl(request.referenceImageUrl),
+        }
+      : defaultBody,
+    strategy.contentType,
   );
-  const image = request.referenceImageUrl
-    ? await fetchAssetAsDataUrl(request.referenceImageUrl)
-    : undefined;
-  const payload = await fetchJson<JsonRecord>(url, "POST", {
-    model: request.model,
-    prompt: request.prompt,
-    negative_prompt: request.negativePrompt,
-    size: request.size,
-    n: request.count ?? 1,
-    aspect_ratio: request.aspectRatio,
-    seed: request.seed,
-    image,
-  });
 
   const images = pickMediaList(payload).map((item) => ({
     url: item.url,
@@ -742,13 +1219,12 @@ export async function generate302Image(request: Provider302ImageRequest): Promis
     };
   }
 
-  const taskId = extractTaskId(payload as TaskSubmitResponse);
+  const taskId = strategy.resolveTaskId?.(payload) ?? extractTaskId(payload as TaskSubmitResponse);
   if (!taskId) {
     throw new Error("302.AI 图片接口未返回结果或 taskId");
   }
 
-  return await pollTaskResult(taskId, {
-    parseResult: (taskPayload) => {
+  return await resolveStrategyResult(taskId, strategy, payload, (taskPayload) => {
       const items = pickMediaList(taskPayload).map((item) => ({
         url: item.url,
         mimeType: item.mimeType === "application/octet-stream" ? "image/png" : item.mimeType,
@@ -759,7 +1235,6 @@ export async function generate302Image(request: Provider302ImageRequest): Promis
         seed: normalizeSeed(request.seed),
         selectedIndex: 0,
       };
-    },
   });
 }
 

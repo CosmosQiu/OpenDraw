@@ -16,10 +16,6 @@ const fieldMap: Record<MovieClawNodeType, NodeFieldDefinition[]> = {
     { key: "model", label: "模型", editable: true, kind: "string" },
     { key: "resolution", label: "分辨率", editable: true, kind: "string" },
     { key: "aspectRatio", label: "宽高比", editable: true, kind: "string" },
-    { key: "count", label: "张数", editable: true, kind: "number" },
-    { key: "steps", label: "步数", editable: true, kind: "number" },
-    { key: "cfgScale", label: "CFG", editable: true, kind: "number" },
-    { key: "seed", label: "随机种子", editable: true, kind: "number" },
   ],
   generate_music: [
     { key: "model", label: "模型", editable: true, kind: "string" },
@@ -33,13 +29,12 @@ const fieldMap: Record<MovieClawNodeType, NodeFieldDefinition[]> = {
       label: "模式",
       editable: true,
       kind: "enum",
-      options: ["text_to_video", "first_last_frame", "multi_image_reference"],
+      options: ["text_to_video", "image_to_video", "first_last_frame", "multi_image_reference"],
     },
     { key: "referenceImageCount", label: "参考图数量", editable: true, kind: "number" },
     { key: "resolution", label: "分辨率", editable: true, kind: "string" },
     { key: "aspectRatio", label: "宽高比", editable: true, kind: "string" },
     { key: "durationSeconds", label: "时长", editable: true, kind: "number" },
-    { key: "seed", label: "随机种子", editable: true, kind: "number" },
   ],
   generate_text: [
     {

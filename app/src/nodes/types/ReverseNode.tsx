@@ -26,9 +26,7 @@ import {
 } from "./shared";
 
 const REVERSE_MODELS = [
-  { value: "openai:gpt-4.1-mini", label: "GPT-4.1 Mini" },
-  { value: "google:gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-  { value: "anthropic:claude-3.5-sonnet", label: "Claude 3.5 Sonnet" },
+  { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
 ];
 
 export type ReverseNode = T.TypeOf<typeof ReverseNode>;
@@ -50,7 +48,7 @@ export class ReverseNodeDefinition extends NodeDefinition<ReverseNode> {
   getDefault(): ReverseNode {
     return {
       type: "reverse",
-      model: "openai:gpt-4.1-mini",
+      model: "gemini-3.1-pro-preview",
       lastResultText: null,
     };
   }
@@ -84,10 +82,20 @@ export class ReverseNodeDefinition extends NodeDefinition<ReverseNode> {
     node: ReverseNode,
     inputs: InputValues,
   ): Promise<ExecutionResult> {
+    const fallbackModel = REVERSE_MODELS[0]?.value ?? node.model;
+    const resolvedModel = REVERSE_MODELS.some((option) => option.value === node.model)
+      ? node.model
+      : fallbackModel;
+    if (resolvedModel !== node.model) {
+      updateNode<ReverseNode>(this.editor, shape, (n) => ({
+        ...n,
+        model: resolvedModel,
+      }));
+    }
     const mediaUrl = (inputs.media as string | null) ?? "";
     const mediaType = inferMediaType(mediaUrl);
     const result = await apiReverse({
-      model: node.model,
+      model: resolvedModel,
       mediaUrl,
       mediaType,
     });
