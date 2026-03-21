@@ -161,6 +161,9 @@ function OnCanvasNodePickerDialog({
         <div className="OnCanvasNodePicker-content">
           <VisuallyHidden.Root>
             <Dialog.Title>Insert node</Dialog.Title>
+            <Dialog.Description>
+              Choose a node type to insert onto the canvas.
+            </Dialog.Description>
           </VisuallyHidden.Root>
           <TldrawUiMenuContextProvider sourceId="dialog" type="menu">
             {children}

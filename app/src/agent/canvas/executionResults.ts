@@ -1,7 +1,7 @@
 import { Editor, TLShapeId } from "tldraw";
 import { DEFAULT_NODE_SPACING_PX } from "../../constants";
 import { NodeShape } from "../../nodes/NodeShapeUtil";
-import { createNodeShapeAtPoint } from "./CanvasNodeService";
+import { CanvasNodeService, createNodeShapeAtPoint } from "./CanvasNodeService";
 
 const RESULT_STACK_LIMIT = 24;
 const DEFAULT_RESULT_NODE_WIDTH = 260;
@@ -11,6 +11,8 @@ export interface TextResultItem {
   title: string;
   text: string;
 }
+
+export type PreviewResultDataType = "image" | "video" | "audio" | "text";
 
 function listNodeShapes(editor: Editor): NodeShape[] {
   return editor
@@ -67,7 +69,8 @@ function findAvailablePosition(
 export function createPreviewResultNode(
   editor: Editor,
   sourceShape: NodeShape,
-  mediaUrl: string,
+  value: string,
+  previewDataType: PreviewResultDataType,
   mediaType?: string | null,
 ) {
   const position = findAvailablePosition(editor, sourceShape, {
@@ -75,17 +78,27 @@ export function createPreviewResultNode(
     height: DEFAULT_RESULT_NODE_HEIGHT,
   });
 
-  return createNodeShapeAtPoint(editor, {
+  const previewNodeId = createNodeShapeAtPoint(editor, {
     type: "preview",
     x: position.x,
     y: position.y,
     center: false,
     select: true,
     props: {
-      lastMediaUrl: mediaUrl,
+      previewDataType,
+      lastValue: value,
       lastMediaType: mediaType ?? null,
     },
   });
+
+  new CanvasNodeService(editor).connectNodes({
+    fromNodeId: sourceShape.id,
+    fromPortId: "output",
+    toNodeId: previewNodeId,
+    toPortId: "input",
+  });
+
+  return previewNodeId;
 }
 
 export function createTextResultNodes(

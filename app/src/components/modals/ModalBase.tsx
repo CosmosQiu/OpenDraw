@@ -29,6 +29,9 @@ export default function ModalBase({ open, onClose, title, children, size = "md" 
             "max-w-[90vw]",
           )}
         >
+          <Dialog.Description className="sr-only">
+            {title}
+          </Dialog.Description>
           {/* 标题栏 */}
           <div className="flex items-center justify-between mb-5">
             <Dialog.Title className="text-[17px] font-semibold text-white">

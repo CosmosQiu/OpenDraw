@@ -21,6 +21,7 @@ import {
   ExecutionResult,
   InfoValues,
   InputValues,
+  inferMediaType,
   isMultiInfoValue,
   NodeComponentProps,
   NodeDefinition,
@@ -230,7 +231,7 @@ export class GenerateVideoNodeDefinition extends NodeDefinition<GenerateVideoNod
         x: NODE_WIDTH_PX,
         y: NODE_HEADER_HEIGHT_PX / 2,
         terminal: "start",
-        dataType: "media",
+        dataType: "video",
       },
     };
   }
@@ -299,7 +300,7 @@ export class GenerateVideoNodeDefinition extends NodeDefinition<GenerateVideoNod
     }));
 
     if (result.videoUrl) {
-      createPreviewResultNode(this.editor, shape, result.videoUrl, result.mimeType);
+      createPreviewResultNode(this.editor, shape, result.videoUrl, "video", result.mimeType);
     }
 
     return { output: result.videoUrl };
@@ -314,7 +315,7 @@ export class GenerateVideoNodeDefinition extends NodeDefinition<GenerateVideoNod
       output: {
         value: node.lastResultUrl,
         isOutOfDate: areAnyInputsOutOfDate(inputs) || shape.props.isOutOfDate,
-        dataType: "media",
+        dataType: "video",
       },
     };
   }
@@ -386,6 +387,9 @@ function GenerateVideoNodeComponent({
   const editor = useEditor();
   const resolutionOptions = getResolutionOptions(node.aspectRatio);
   const supportedModes = getSupportedVideoModes(node.model);
+  const previewMediaType = node.lastResultUrl
+    ? inferMediaType(node.lastResultUrl, node.lastResultMimeType)
+    : null;
   const inputValues = useValue(
     "video input values",
     () => getNodeInputPortValues(editor, shape.id),
@@ -516,7 +520,11 @@ function GenerateVideoNodeComponent({
         })}
       >
         {node.lastResultUrl ? (
-          <NodeMedia src={node.lastResultUrl} alt="Generated video" mediaType="video" />
+          <NodeMedia
+            src={node.lastResultUrl}
+            alt="Generated video"
+            mediaType={previewMediaType ?? "video"}
+          />
         ) : (
           <div className="NodeImagePreview-empty">
             <span>运行后生成视频</span>

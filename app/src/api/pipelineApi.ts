@@ -186,7 +186,7 @@ function createVideoPlaceholderResult(
   return {
     videoUrl: createSvgDataUrl(
       `Video ${params.durationSeconds ?? 5}s · ${modeLabel}`,
-      params.prompt || "Placeholder video generation result",
+      `视频生成请求失败，当前显示占位图。${params.prompt || "Placeholder video generation result"}`,
       "#0f766e",
     ),
     mimeType: "image/svg+xml",

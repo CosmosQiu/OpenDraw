@@ -430,7 +430,11 @@ function buildUrl(baseUrl: string, route: string): string {
 
 function getProviderEnvConfig(): ProviderEnvConfig {
   const apiKey = import.meta.env.VITE_302_API_KEY?.trim();
-  const baseUrl = trimTrailingSlash(import.meta.env.VITE_302_BASE_URL) || DEFAULT_302_BASE_URL;
+  const configuredBaseUrl = trimTrailingSlash(import.meta.env.VITE_302_BASE_URL) || DEFAULT_302_BASE_URL;
+  const baseUrl =
+    import.meta.env.DEV && /^https:\/\/api\.302\.ai\/?$/i.test(configuredBaseUrl)
+      ? "/302-api"
+      : configuredBaseUrl;
   const taskStatusRouteTemplate = import.meta.env.VITE_302_TASK_STATUS_ROUTE_TEMPLATE?.trim();
 
   if (!apiKey) {

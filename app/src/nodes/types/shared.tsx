@@ -302,11 +302,15 @@ export function NodeMedia({
   alt: string;
   mediaType: "image" | "video" | "audio";
 }) {
+  const onMediaError = useCallback((e: SyntheticEvent<HTMLMediaElement>) => {
+    e.currentTarget.style.display = "none";
+  }, []);
+
   if (mediaType === "video") {
-    return <video src={src} aria-label={alt} controls playsInline />;
+    return <video src={src} aria-label={alt} controls playsInline onError={onMediaError} />;
   }
   if (mediaType === "audio") {
-    return <audio src={src} aria-label={alt} controls />;
+    return <audio src={src} aria-label={alt} controls onError={onMediaError} />;
   }
   return <NodeImage src={src} alt={alt} />;
 }

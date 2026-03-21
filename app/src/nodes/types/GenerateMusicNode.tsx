@@ -87,7 +87,7 @@ export class GenerateMusicNodeDefinition extends NodeDefinition<GenerateMusicNod
         x: NODE_WIDTH_PX,
         y: NODE_HEADER_HEIGHT_PX / 2,
         terminal: "start",
-        dataType: "media",
+        dataType: "audio",
       },
     };
   }
@@ -124,7 +124,7 @@ export class GenerateMusicNodeDefinition extends NodeDefinition<GenerateMusicNod
     }));
 
     if (result.audioUrl) {
-      createPreviewResultNode(this.editor, shape, result.audioUrl, result.mimeType);
+      createPreviewResultNode(this.editor, shape, result.audioUrl, "audio", result.mimeType);
     }
 
     return { output: result.audioUrl };
@@ -139,7 +139,7 @@ export class GenerateMusicNodeDefinition extends NodeDefinition<GenerateMusicNod
       output: {
         value: node.lastResultUrl,
         isOutOfDate: areAnyInputsOutOfDate(inputs) || shape.props.isOutOfDate,
-        dataType: "media",
+        dataType: "audio",
       },
     };
   }

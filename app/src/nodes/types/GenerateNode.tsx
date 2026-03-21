@@ -222,6 +222,7 @@ export class GenerateNodeDefinition extends NodeDefinition<GenerateNode> {
         this.editor,
         shape,
         selectedImage,
+        "image",
         result.images[selectedIndex]?.mimeType ?? null,
       );
     }
