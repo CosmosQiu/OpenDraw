@@ -1027,7 +1027,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .MovieClawSidebar-header {
@@ -1044,7 +1044,7 @@ body {
 
 .MovieClawSidebar-list {
   flex: 1 1 auto;
-  overflow-y: auto;
+  overflow: visible;
   padding-bottom: 8px;
 }
 
@@ -1098,6 +1098,33 @@ body {
   }
 }
 
+.MovieClawSidebar-itemWrap {
+  position: relative;
+}
+
+.MovieClawSidebar-item-arrow {
+  flex: 0 0 auto;
+  color: var(--tl-color-text-3);
+}
+
+.MovieClawSidebar-submenu {
+  display: none;
+  position: absolute;
+  left: calc(100% - 6px);
+  top: 0;
+  width: 180px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: var(--node-shadow-highlight);
+  padding: 4px 0;
+  z-index: calc(var(--tl-layer-overlays) + 1);
+}
+
+.MovieClawSidebar-itemWrap:hover > .MovieClawSidebar-submenu,
+.MovieClawSidebar-itemWrap:focus-within > .MovieClawSidebar-submenu {
+  display: block;
+}
+
 @media (hover: hover) {
   .MovieClawSidebar-item:hover::after {
     opacity: 1;
@@ -1132,7 +1159,7 @@ body {
   border-radius: 8px;
   box-shadow: var(--node-shadow-highlight);
   z-index: var(--tl-layer-overlays);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .MovieClawStylePanel {

@@ -56,6 +56,13 @@ const fieldMap: Record<MovieClawNodeType, NodeFieldDefinition[]> = {
     { key: "title", label: "标题", editable: true, kind: "string" },
     { key: "text", label: "文本", editable: true, kind: "string" },
   ],
+  script_scene_placeholder: [],
+  character_bio_placeholder: [],
+  scene_description_placeholder: [],
+  storyboard_script_placeholder: [],
+  character_design_placeholder: [],
+  scene_design_placeholder: [],
+  storyboard_image_placeholder: [],
 };
 
 export function getCanvasNodeTypeDefinitions(editor: Editor): CanvasNodeTypeDefinition[] {

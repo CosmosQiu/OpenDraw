@@ -20,6 +20,15 @@ import { TextResultNodeDefinition } from "./types/TextResultNode";
 import { GenerateVideoNodeDefinition } from "./types/GenerateVideoNode";
 import { ReverseNodeDefinition } from "./types/ReverseNode";
 import {
+  CharacterBioPlaceholderNodeDefinition,
+  CharacterDesignPlaceholderNodeDefinition,
+  SceneDescriptionPlaceholderNodeDefinition,
+  SceneDesignPlaceholderNodeDefinition,
+  ScriptScenePlaceholderNodeDefinition,
+  StoryboardImagePlaceholderNodeDefinition,
+  StoryboardScriptPlaceholderNodeDefinition,
+} from "./types/PlaceholderFeatureNodes";
+import {
   ExecutionResult,
   InfoValues,
   NodeDefinition,
@@ -39,6 +48,13 @@ export const NodeDefinitions = {
   load_image: LoadImageNodeDefinition,
   preview: PreviewNodeDefinition,
   text_result: TextResultNodeDefinition,
+  script_scene_placeholder: ScriptScenePlaceholderNodeDefinition,
+  character_bio_placeholder: CharacterBioPlaceholderNodeDefinition,
+  scene_description_placeholder: SceneDescriptionPlaceholderNodeDefinition,
+  storyboard_script_placeholder: StoryboardScriptPlaceholderNodeDefinition,
+  character_design_placeholder: CharacterDesignPlaceholderNodeDefinition,
+  scene_design_placeholder: SceneDesignPlaceholderNodeDefinition,
+  storyboard_image_placeholder: StoryboardImagePlaceholderNodeDefinition,
 } satisfies Record<string, NodeDefinitionConstructor<any>>;
 
 export type NodeType = T.TypeOf<typeof NodeType>;
